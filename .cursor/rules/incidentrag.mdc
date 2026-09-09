@@ -1,0 +1,43 @@
+---
+description: Project-wide rules for the IncidentRAG project
+globs:
+alwaysApply: true
+---
+
+# IncidentRAG Project Rules
+
+1. NEVER import from `references/`.
+   Reimplement required functionality inside `src/incidentrag/`.
+
+2. ALWAYS import shared types from `src/incidentrag/core/models.py`.
+   Never redefine shared types elsewhere.
+
+3. Every LLM call MUST use structured output.
+   Use Pydantic models and/or JSON mode.
+
+4. Every retrieval operation MUST return `RetrievalResult`
+   with complete `RetrievalScores`.
+
+5. Every LLM-generated claim MUST include an `Evidence`
+   object pointing to a specific `chunk_id`.
+
+6. Follow the build order defined in `SPEC.md §18`.
+   Do not skip phases.
+
+7. Every module MUST have a corresponding test file
+   under `tests/unit/`.
+
+8. Use async everywhere.
+   Do not introduce blocking calls in the request path.
+
+9. When unsure about an implementation pattern, ask which
+   reference repository demonstrates the desired pattern
+   before implementing.
+
+10. Do not modify or redefine architecture decisions already
+    established in `SPEC.md` without explicit approval.
+
+11. Keep implementations production-oriented:
+    type-safe, testable, observable, and maintainable.
+
+12. Prefer small, composable modules over large monolithic files.
