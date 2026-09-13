@@ -8,7 +8,34 @@ from __future__ import annotations
 
 from typing import Protocol, runtime_checkable
 
-from .models import Chunk, Claim, Evidence, IncidentAssessment, Query, RetrievalResult
+from .models import (
+    Chunk,
+    Claim,
+    Evidence,
+    ExternalIssue,
+    IncidentAssessment,
+    IssueFilters,
+    Query,
+    RawAlert,
+    RetrievalResult,
+)
+
+
+@runtime_checkable
+class IncidentSource(Protocol):
+    """Read-only, manually invoked provider of external incident candidates."""
+
+    async def fetch_candidates(self, filters: IssueFilters) -> list[ExternalIssue]:
+        """Return a bounded, ranked set of sanitized candidates."""
+        ...
+
+    async def fetch_issue(self, issue_number: int) -> ExternalIssue:
+        """Fetch one sanitized issue without mutating the source system."""
+        ...
+
+    def normalize(self, issue: ExternalIssue) -> RawAlert:
+        """Map an external issue into the canonical IncidentRAG alert model."""
+        ...
 
 
 @runtime_checkable

@@ -1,0 +1,63 @@
+name: Deploy AWS staging
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - uses: aws-actions/amazon-ecr-login@v2
+      - run: |
+          docker build -t "$API_REPOSITORY:$GITHUB_SHA" .
+          docker push "$API_REPOSITORY:$GITHUB_SHA"
+          docker build -f Dockerfile.ui -t "$UI_REPOSITORY:$GITHUB_SHA" .
+          docker push "$UI_REPOSITORY:$GITHUB_SHA"
+        env:
+          API_REPOSITORY: ${{ vars.API_REPOSITORY }}
+          UI_REPOSITORY: ${{ vars.UI_REPOSITORY }}
+      - run: aws eks update-kubeconfig --name "$EKS_CLUSTER" --region "$AWS_REGION"
+        env:
+          EKS_CLUSTER: ${{ vars.EKS_CLUSTER }}
+          AWS_REGION: ${{ vars.AWS_REGION }}
+      - run: |
+          helm upgrade --install incidentrag deploy/helm/incidentrag \
+            --namespace incidentrag --create-namespace \
+            --set image.repository="$API_REPOSITORY" \
+            --set image.tag="$GITHUB_SHA" \
+            --set ui.image.repository="$UI_REPOSITORY" \
+            --set ui.image.tag="$GITHUB_SHA" \
+            --set externalSecret.enabled=true \
+            --set externalSecret.remoteKey="$SECRET_REMOTE_KEY" \
+            --set config.qdrantUrl="$QDRANT_URL" \
+            --set config.neo4jUri="$NEO4J_URI" \
+            --set config.redisUrl="$REDIS_URL" \
+            --set config.otelEndpoint="$OTEL_ENDPOINT" \
+            --set ingress.enabled=true \
+            --set ingress.host="$APP_HOST" \
+            --set-string ingress.annotations."alb\.ingress\.kubernetes\.io/scheme"="internet-facing" \
+            --set-string ingress.annotations."alb\.ingress\.kubernetes\.io/target-type"="ip" \
+            --set-string ingress.annotations."alb\.ingress\.kubernetes\.io/listen-ports"='[{"HTTPS":443}]' \
+            --set-string ingress.annotations."alb\.ingress\.kubernetes\.io/certificate-arn"="$ACM_CERTIFICATE_ARN" \
+            --set-string ingress.annotations."alb\.ingress\.kubernetes\.io/healthcheck-path"="/_stcore/health" \
+            --wait --timeout 10m
+        env:
+          API_REPOSITORY: ${{ vars.API_REPOSITORY }}
+          UI_REPOSITORY: ${{ vars.UI_REPOSITORY }}
+          SECRET_REMOTE_KEY: ${{ vars.SECRET_REMOTE_KEY }}
+          QDRANT_URL: ${{ vars.QDRANT_URL }}
+          NEO4J_URI: ${{ vars.NEO4J_URI }}
+          REDIS_URL: ${{ vars.REDIS_URL }}
+          OTEL_ENDPOINT: ${{ vars.OTEL_ENDPOINT }}
+          APP_HOST: ${{ vars.APP_HOST }}
+          ACM_CERTIFICATE_ARN: ${{ vars.ACM_CERTIFICATE_ARN }}

@@ -6,7 +6,7 @@ Uses pydantic-settings for type-safe, validated access.
 
 from __future__ import annotations
 
-from pydantic import Field, field_validator
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -25,8 +25,8 @@ class Settings(BaseSettings):
     )
 
     # ── LLM API Keys ──────────────────────────────────────────────────────
-    anthropic_api_key: str = Field(..., description="Anthropic API key (required)")
-    openai_api_key: str = Field(..., description="OpenAI API key (required)")
+    anthropic_api_key: str = Field(default="", description="Optional Anthropic API key")
+    openai_api_key: str = Field(default="", description="Optional direct OpenAI API key")
 
     # ── Model Names ────────────────────────────────────────────────────────
     anthropic_reasoning_model: str = Field(
@@ -80,10 +80,31 @@ class Settings(BaseSettings):
         description="Redis connection URL (used for caching and feedback queue)",
     )
 
+    # GitHub is a manual, read-only public issue source.  The token is optional.
+    github_owner: str = Field(default="argoproj")
+    github_repo: str = Field(default="argo-cd")
+    github_token: SecretStr | None = Field(default=None, repr=False)
+    github_max_results: int = Field(default=2, ge=1)
+    github_candidate_limit: int = Field(default=10, ge=1)
+    github_updated_within_days: int = Field(default=90, ge=1)
+    github_api_base_url: str = Field(default="https://api.github.com")
+    github_request_timeout_seconds: float = Field(default=10.0, gt=0, le=30)
+    demo_mode: bool = Field(default=True)
+    execution_enabled: bool = Field(default=False)
+    incidentrag_api_key: SecretStr | None = Field(default=None, repr=False)
+    cors_allowed_origins: str = Field(
+        default="http://localhost:8501,http://localhost:8000",
+        description="Comma-separated browser origins allowed to call the API",
+    )
+
     # ── OpenTelemetry ──────────────────────────────────────────────────────
     otel_exporter_otlp_endpoint: str = Field(
         default="http://localhost:4317",
         description="OTLP gRPC collector endpoint",
+    )
+    otel_service_name: str = Field(
+        default="incidentrag",
+        description="Service name attached to OpenTelemetry spans",
     )
 
     # ── Application Behaviour ──────────────────────────────────────────────
@@ -124,6 +145,63 @@ class Settings(BaseSettings):
         description="Directory for the embedding diskcache",
     )
 
+    # ── Query Pipeline ─────────────────────────────────────────────────────
+    utility_model: str = Field(
+        default="gpt-4o-mini",
+        description="Small LLM for classification, fanout, and entity extraction",
+    )
+    auto_execute_low_risk: bool = Field(
+        default=False,
+        description="If True, LOW-risk actions are executed without human approval",
+    )
+
+    # ── OpenRouter (optional proxy) ────────────────────────────────────────
+    openrouter_api_key: SecretStr | None = Field(
+        default=None,
+        repr=False,
+        description="OpenRouter API key (preferred for chat and embeddings)",
+    )
+    openrouter_base_url: str = Field(
+        default="https://openrouter.ai/api/v1",
+        description="OpenRouter base URL",
+    )
+    openrouter_utility_model: str = Field(
+        default="openai/gpt-4o-mini",
+        description="OpenRouter model used for query understanding",
+    )
+    openrouter_reasoning_model: str = Field(
+        default="openai/gpt-4o",
+        description="OpenRouter model used for assessment and grounding",
+    )
+    reasoning_max_output_tokens: int = Field(
+        default=2_000,
+        ge=256,
+        le=8_192,
+        description="Maximum completion tokens for a structured assessment",
+    )
+    openrouter_embedding_model: str = Field(
+        default="openai/text-embedding-3-small",
+        description="OpenRouter embedding model; dimension must match Qdrant",
+    )
+    openrouter_http_referer: str = Field(
+        default="http://localhost:8000",
+        description="Optional OpenRouter attribution URL",
+    )
+    openrouter_app_title: str = Field(
+        default="IncidentRAG",
+        description="Optional OpenRouter attribution title",
+    )
+
+    # ── Retrieval Tuning ───────────────────────────────────────────────────
+    rrf_k: int = Field(
+        default=60,
+        description="RRF constant k in 1/(k+rank). Default 60 per the SPEC.",
+    )
+    recency_half_life_days: int = Field(
+        default=90,
+        description="Days after which a runbook's recency boost drops to 0.5",
+    )
+
     # ── Validators ─────────────────────────────────────────────────────────
     @field_validator("app_environment")
     @classmethod
@@ -161,3 +239,8 @@ def get_settings() -> Settings:
     if _settings is None:
         _settings = Settings()
     return _settings
+
+
+# Module-level singleton — allows `from incidentrag.core.settings import settings`.
+# Use get_settings() everywhere else to benefit from the lazy cache.
+settings = get_settings()

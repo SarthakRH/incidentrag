@@ -1,0 +1,41 @@
+# Copy to values-staging.yaml, replace every CHANGE_ME value, and keep that file private.
+image:
+  repository: CHANGE_ME_ACCOUNT.dkr.ecr.CHANGE_ME_REGION.amazonaws.com/incidentrag-staging-api
+  tag: CHANGE_ME_IMAGE_TAG
+
+ui:
+  image:
+    repository: CHANGE_ME_ACCOUNT.dkr.ecr.CHANGE_ME_REGION.amazonaws.com/incidentrag-staging-ui
+    tag: CHANGE_ME_IMAGE_TAG
+
+ingress:
+  enabled: true
+  className: alb
+  host: incidentrag.CHANGE_ME_DOMAIN
+  annotations:
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS":443}]'
+    alb.ingress.kubernetes.io/certificate-arn: CHANGE_ME_ACM_CERTIFICATE_ARN
+    alb.ingress.kubernetes.io/healthcheck-path: /_stcore/health
+    alb.ingress.kubernetes.io/success-codes: 200-399
+
+externalSecret:
+  enabled: true
+  remoteKey: incidentrag-staging/application
+  secretStoreName: aws-secrets-manager
+  secretStoreKind: ClusterSecretStore
+
+config:
+  qdrantUrl: CHANGE_ME_QDRANT_URL
+  neo4jUri: CHANGE_ME_NEO4J_URI
+  neo4jUser: neo4j
+  redisUrl: CHANGE_ME_REDIS_URL
+  otelEndpoint: CHANGE_ME_OTEL_ENDPOINT
+  executionEnabled: "false"
+  corsAllowedOrigins: https://incidentrag.CHANGE_ME_DOMAIN
+  githubOwner: argoproj
+  githubRepo: argo-cd
+
+bootstrapRunbooks:
+  enabled: true

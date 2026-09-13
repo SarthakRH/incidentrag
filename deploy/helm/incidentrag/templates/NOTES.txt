@@ -1,0 +1,5 @@
+Create {{ .Values.existingSecret }} with OPENROUTER_API_KEY, GITHUB_TOKEN,
+NEO4J_PASSWORD, and INCIDENTRAG_API_KEY before installing this chart.
+
+Execution is disabled by default. Keep EXECUTION_ENABLED=false until a scoped
+Kubernetes service account and an audited command policy are configured.

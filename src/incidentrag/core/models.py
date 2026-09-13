@@ -6,7 +6,7 @@ No module should define its own version of these types — always import from he
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Literal
 
@@ -114,7 +114,9 @@ class RawAlert(BaseModel):
     """
 
     alert_id: str
-    source: Literal["pagerduty", "datadog", "prometheus", "grafana", "opsgenie"]
+    source: Literal[
+        "pagerduty", "datadog", "prometheus", "grafana", "opsgenie", "github"
+    ]
     received_at: datetime
     raw_payload: dict[str, Any]
 
@@ -128,18 +130,66 @@ class RawAlert(BaseModel):
     threshold: float | None = None
 
 
+class IssueFilters(BaseModel):
+    """User-selected filters for a manual external-issue fetch."""
+
+    keyword: str | None = Field(default=None, max_length=200)
+    component: str | None = Field(default=None, max_length=100)
+    severity: str | None = Field(default=None, max_length=100)
+    priority: str | None = Field(default=None, max_length=100)
+    regression: bool = False
+    updated_within_days: int = Field(default=90, ge=1, le=3650)
+    limit: int = Field(default=2, ge=1, le=2)
+
+
+class GitHubRateLimit(BaseModel):
+    """Safe GitHub rate-limit metadata; never includes credentials."""
+
+    remaining: int | None = None
+    reset_at: datetime | None = None
+
+
+class ExternalIssue(BaseModel):
+    """Sanitized, bounded representation of an untrusted public issue."""
+
+    repository: str
+    number: int
+    state: Literal["open", "closed"] = "open"
+    title: str
+    body: str
+    labels: list[str] = Field(default_factory=list)
+    author: str | None = None
+    created_at: datetime
+    updated_at: datetime
+    comments_count: int = 0
+    html_url: str
+    api_url: str
+    suitability_score: float = Field(default=0.0, ge=0.0, le=100.0)
+    selection_explanation: list[str] = Field(default_factory=list)
+    recent_comments: list[str] = Field(default_factory=list)
+
+
+class GitHubLabel(BaseModel):
+    """Safe subset of repository label metadata."""
+
+    name: str
+    color: str = ""
+    description: str = ""
+
+
 class ExtractedEntities(BaseModel):
     """
     Output of the entity extractor (Layer 2).
+    All fields are optional (default None) — the extractor populates what it can.
     """
 
-    service: str | None
-    environment: str | None
-    metric: str | None
-    metric_value: float | None
-    threshold: float | None
-    host_identifier: str | None
-    error_signature: str | None          # e.g. "OOMKilled"
+    service: str | None = None
+    environment: str | None = None
+    metric: str | None = None
+    metric_value: float | None = None
+    threshold: float | None = None
+    host_identifier: str | None = None
+    error_signature: str | None = None          # e.g. "OOMKilled"
     correlated_services: list[str] = Field(default_factory=list)
 
 
@@ -334,7 +384,7 @@ class IncidentAssessment(BaseModel):
     # What would increase confidence
     additional_info_needed: list[str] = Field(default_factory=list)
 
-    generated_at: datetime = Field(default_factory=datetime.utcnow)
+    generated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     llm_model: str
     total_tokens: int
     cost_usd: float
@@ -386,7 +436,7 @@ class DriftMeasurement(BaseModel):
     """
 
     measurement_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     class_label: str                     # e.g. "payment-service-memory-alerts"
     mean_similarity: float               # Query→known-good chunks
     std_similarity: float

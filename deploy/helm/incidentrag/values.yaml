@@ -1,0 +1,73 @@
+replicaCount: 1
+
+image:
+  repository: incidentrag-api
+  tag: latest
+  pullPolicy: IfNotPresent
+
+ui:
+  enabled: true
+  image:
+    repository: incidentrag-ui
+    tag: latest
+    pullPolicy: IfNotPresent
+
+bootstrapRunbooks:
+  enabled: true
+
+service:
+  type: ClusterIP
+  port: 8000
+
+ingress:
+  enabled: false
+  className: alb
+  host: incidentrag.example.com
+  annotations: {}
+
+existingSecret: incidentrag-secrets
+
+externalSecret:
+  enabled: false
+  remoteKey: incidentrag-staging/application
+  refreshInterval: 1h
+  secretStoreName: aws-secrets-manager
+  secretStoreKind: ClusterSecretStore
+
+config:
+  qdrantUrl: http://qdrant:6333
+  neo4jUri: bolt://neo4j:7687
+  neo4jUser: neo4j
+  redisUrl: redis://redis:6379/0
+  otelEndpoint: http://otel-collector:4317
+  executionEnabled: "false"
+  corsAllowedOrigins: https://incidentrag.example.com
+  githubOwner: argoproj
+  githubRepo: argo-cd
+  openrouterBaseUrl: https://openrouter.ai/api/v1
+  openrouterUtilityModel: openai/gpt-4o-mini
+  openrouterReasoningModel: openai/gpt-4o
+  openrouterEmbeddingModel: openai/text-embedding-3-small
+
+resources:
+  requests:
+    cpu: 500m
+    memory: 1Gi
+  limits:
+    cpu: "2"
+    memory: 4Gi
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 4
+  targetCPUUtilizationPercentage: 70
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
