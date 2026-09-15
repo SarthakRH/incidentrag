@@ -6,9 +6,10 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from incidentrag.core.exceptions import GenerationError
 from incidentrag.core.models import Claim, RiskLevel
 from incidentrag.generation.reasoner import GroundingVerifier, StructuredReasoner
-from tests.unit.conftest import make_evidence, make_query, make_retrieval_result, make_chunk
+from tests.unit.conftest import make_chunk, make_evidence, make_query, make_retrieval_result
 
 
 def _mock_llm_response(content: str, prompt_tokens: int = 500, completion_tokens: int = 200):
@@ -110,15 +111,40 @@ class TestStructuredReasoner:
             return_value=_mock_llm_response("not valid json {{{")
         )
         reasoner = StructuredReasoner(client=client)
-        assessment = await reasoner.reason(
-            query=sample_query,
-            context="ctx",
-            retrieval_results=sample_retrieval_results,
+        with pytest.raises(GenerationError, match="malformed JSON"):
+            await reasoner.reason(
+                query=sample_query,
+                context="ctx",
+                retrieval_results=sample_retrieval_results,
+            )
+
+    @pytest.mark.asyncio
+    async def test_reason_rejects_root_cause_without_evidence(
+        self, sample_query, sample_retrieval_results
+    ):
+        llm_output = json.dumps({
+            "root_cause": {
+                "statement": "A plausible but unsupported cause",
+                "evidence_indices": [],
+                "confidence": 0.7,
+            },
+            "contributing_factors": [],
+            "overall_confidence": 0.7,
+            "proposed_actions": [],
+            "diagnostic_actions": [],
+            "escalate_to_human": False,
+        })
+        client = AsyncMock()
+        client.chat.completions.create = AsyncMock(
+            return_value=_mock_llm_response(llm_output)
         )
-        # Should return a placeholder assessment, not crash
-        assert assessment.root_cause is not None
-        assert len(assessment.root_cause.evidence) >= 1  # fallback evidence
-        assert assessment.overall_confidence == 0.0
+
+        with pytest.raises(GenerationError, match="did not cite"):
+            await StructuredReasoner(client=client).reason(
+                query=sample_query,
+                context="ctx",
+                retrieval_results=sample_retrieval_results,
+            )
 
     @pytest.mark.asyncio
     async def test_reason_auto_escalates_dangerous_action(self, sample_query, sample_retrieval_results):
@@ -179,8 +205,8 @@ class TestStructuredReasoner:
             context="ctx",
             retrieval_results=sample_retrieval_results,
         )
-        # gpt-4o: 1000 * 0.005 + 500 * 0.015 = 12.5 / 1000 = 0.0125
-        assert 0.01 < assessment.cost_usd < 0.02
+        # gpt-4o-mini: 1000 * 0.00015 + 500 * 0.0006 = 0.45 / 1000 = 0.00045
+        assert 0.0004 < assessment.cost_usd < 0.0005
 
 
 class TestGroundingVerifier:

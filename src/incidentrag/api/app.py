@@ -97,6 +97,9 @@ async def startup() -> None:
     try:
         await _graph.setup()
         await _dense.ensure_collection()
+        stored = await _dense.list_chunks()
+        if stored:
+            _bm25.build(stored)
     except Exception as exc:
         logger.warning("Startup: infrastructure not fully ready: %s", exc)
 

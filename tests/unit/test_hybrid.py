@@ -1,16 +1,18 @@
 """Tests for HybridRetriever."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from incidentrag.core.models import RetrievalOutput, RetrievalResult
-from incidentrag.retrieval.hybrid import HybridRetriever, _fused_to_result
+from incidentrag.core.models import RetrievalOutput
+from incidentrag.retrieval.hybrid import (
+    HybridRetriever,
+    _fused_to_result,
+    _service_matches,
+)
 from incidentrag.retrieval.rrf import _FusedEntry
 from tests.unit.conftest import make_chunk, make_retrieval_result
-
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -115,6 +117,30 @@ async def test_retrieve_result_count(retriever, mock_reranker):
         top_k=5,
     )
     assert len(output.results) <= 5
+
+
+def test_service_matching_rejects_unrelated_runbook():
+    assert _service_matches("argocd-repo-server", "argocd-repo-server") is True
+    assert _service_matches("argocd-repo-server", "database-proxy") is False
+    assert _service_matches("argo-cd", "argocd-repo-server") is True
+
+
+async def test_retrieve_filters_unrelated_service_before_reranking(
+    mock_bm25, mock_dense, mock_reranker
+):
+    mock_reranker.rerank.side_effect = (
+        lambda query, candidates, top_k=None: candidates
+    )
+    output = await HybridRetriever(
+        bm25=mock_bm25, dense=mock_dense, reranker=mock_reranker
+    ).retrieve(
+        alert_id="a1",
+        queries=["repository sync stale revision"],
+        service="argocd-repo-server",
+    )
+
+    assert output.results == []
+    assert mock_reranker.rerank.await_args.args[1] == []
 
 
 async def test_retrieve_query_id_matches_alert_id(retriever):

@@ -25,7 +25,7 @@ def test_openrouter_is_preferred_for_chat_and_embeddings() -> None:
     assert kwargs["base_url"] == "https://openrouter.ai/api/v1"
     assert kwargs["default_headers"]["X-OpenRouter-Title"] == "IncidentRAG"
     assert utility_model_name(settings) == "openai/gpt-4o-mini"
-    assert reasoning_model_name(settings) == "openai/gpt-4o"
+    assert reasoning_model_name(settings) == "openai/gpt-4o-mini"
     assert embedding_model_name(settings) == "openai/text-embedding-3-small"
 
 

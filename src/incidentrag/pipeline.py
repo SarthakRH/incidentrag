@@ -19,6 +19,7 @@ import uuid
 from dataclasses import dataclass, field
 
 from incidentrag.approval.gate import ApprovalGate, ApprovalRequest
+from incidentrag.core.exceptions import RetrievalError
 from incidentrag.core.models import IncidentAssessment, Query, RawAlert
 from incidentrag.execution.sandbox import SandboxExecutor
 from incidentrag.feedback.loop import ChunkScoreUpdater, EvalSetExpander
@@ -78,7 +79,12 @@ class IncidentRAGPipeline:
                     alert_id=alert.alert_id,
                     queries=queries,
                     hyde_document=hyde_doc,
+                    service=alert.service_name or entities.service,
                 )
+                if not retrieval_output.results:
+                    raise RetrievalError(
+                        "No relevant runbook evidence matched the incident service"
+                    )
 
             # ── L4: Graph Traversal ───────────────────────────────────────
             blast_radius = None

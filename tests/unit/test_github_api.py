@@ -6,8 +6,10 @@ from collections.abc import Iterator
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
+from openai import APIStatusError
 
 from incidentrag.api import app as app_module
 from incidentrag.api.github_router import (
@@ -15,6 +17,7 @@ from incidentrag.api.github_router import (
     get_analysis_pipeline,
     get_github_provider,
 )
+from incidentrag.core.exceptions import GenerationError, RetrievalError
 from incidentrag.core.models import ExternalIssue, GitHubLabel, GitHubRateLimit
 from incidentrag.pipeline import PipelineResult
 from incidentrag.sources.github import GitHubIssueProvider, GitHubSourceError
@@ -230,6 +233,60 @@ def test_analysis_reuses_existing_pipeline_and_stores_assessment(
     assert "UNTRUSTED_EXTERNAL_ISSUE" in alert.alert_text
     assert "inc-github-42" in app_module._assessments
     provider.normalize.assert_called_once()
+
+
+@pytest.mark.parametrize(
+    ("error", "expected_status", "expected_detail"),
+    [
+        (
+            RetrievalError("no match"),
+            422,
+            "No relevant runbook evidence was found for this incident. "
+            "Ingest a matching runbook and retry.",
+        ),
+        (
+            GenerationError("bad model output"),
+            502,
+            "The AI provider did not return a valid evidence-grounded assessment.",
+        ),
+    ],
+)
+def test_analysis_does_not_return_placeholder_success(
+    github_api: GitHubApiFixture,
+    error: Exception,
+    expected_status: int,
+    expected_detail: str,
+) -> None:
+    client, _, pipeline = github_api
+    pipeline.process.side_effect = error
+
+    response = client.post("/sources/github/issues/42/analyze")
+
+    assert response.status_code == expected_status
+    assert response.json()["detail"] == expected_detail
+
+
+def test_analysis_preserves_provider_payment_required_status(
+    github_api: GitHubApiFixture,
+) -> None:
+    client, _, pipeline = github_api
+    provider_response = httpx.Response(
+        402,
+        request=httpx.Request("POST", "https://provider.invalid/chat/completions"),
+    )
+    pipeline.process.side_effect = APIStatusError(
+        "Payment required",
+        response=provider_response,
+        body={"error": {"message": "Insufficient credits"}},
+    )
+
+    response = client.post("/sources/github/issues/42/analyze")
+
+    assert response.status_code == 402
+    assert response.json()["detail"] == (
+        "The AI provider requires payment or available credits. "
+        "Add credits or configure another provider, then retry."
+    )
 
 
 def test_prompt_injection_content_is_inert_and_secret_redacted(

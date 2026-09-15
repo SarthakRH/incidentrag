@@ -34,7 +34,7 @@ class Settings(BaseSettings):
         description="Primary Anthropic model for reasoning and generation",
     )
     openai_reasoning_model: str = Field(
-        default="gpt-4o",
+        default="gpt-4o-mini",
         description="OpenAI model used as fallback / secondary reasoner",
     )
     openai_embedding_model: str = Field(
@@ -128,6 +128,13 @@ class Settings(BaseSettings):
         default=50,
         description="Dense retrieval candidate pool size before reranking",
     )
+    reranker_min_score: float = Field(
+        default=0.0,
+        description=(
+            "Minimum cross-encoder relevance score. Candidates below this value "
+            "are not supplied to the reasoner."
+        ),
+    )
 
     # ── Evaluation ─────────────────────────────────────────────────────────
     eval_dataset_path: str = Field(
@@ -170,7 +177,7 @@ class Settings(BaseSettings):
         description="OpenRouter model used for query understanding",
     )
     openrouter_reasoning_model: str = Field(
-        default="openai/gpt-4o",
+        default="openai/gpt-4o-mini",
         description="OpenRouter model used for assessment and grounding",
     )
     reasoning_max_output_tokens: int = Field(

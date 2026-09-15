@@ -10,7 +10,14 @@ import pytest
 from incidentrag.approval.ui.api_client import (
     IncidentRAGAPIClient,
     IncidentRAGAPIError,
+    prefer_ipv4_loopback,
 )
+
+
+def test_localhost_api_url_uses_ipv4_loopback() -> None:
+    assert prefer_ipv4_loopback("http://localhost:8000") == "http://127.0.0.1:8000"
+    client = IncidentRAGAPIClient("http://localhost:8000")
+    assert client.base_url == "http://127.0.0.1:8000"
 
 
 def test_find_issues_omits_empty_filters_and_sends_server_api_key() -> None:

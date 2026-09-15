@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from openai import APIConnectionError, APIStatusError, APITimeoutError, RateLimitError
 from pydantic import ValidationError
 
+from incidentrag.core.exceptions import GenerationError, RetrievalError
 from incidentrag.core.models import ExternalIssue, IssueFilters, RawAlert
 from incidentrag.sources.github import GitHubIssueProvider, GitHubSourceError
 
@@ -238,7 +239,30 @@ async def analyze_github_issue(
             issue_number,
             exc.status_code,
         )
+        if exc.status_code == 402:
+            raise HTTPException(
+                status_code=402,
+                detail=(
+                    "The AI provider requires payment or available credits. "
+                    "Add credits or configure another provider, then retry."
+                ),
+            ) from exc
         raise HTTPException(status_code=502, detail="AI provider rejected the analysis") from exc
+    except RetrievalError as exc:
+        logger.info("No relevant evidence for issue_number=%s: %s", issue_number, exc)
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "No relevant runbook evidence was found for this incident. "
+                "Ingest a matching runbook and retry."
+            ),
+        ) from exc
+    except GenerationError as exc:
+        logger.warning("Invalid reasoning output for issue_number=%s: %s", issue_number, exc)
+        raise HTTPException(
+            status_code=502,
+            detail="The AI provider did not return a valid evidence-grounded assessment.",
+        ) from exc
     except HTTPException:
         raise
     except Exception as exc:

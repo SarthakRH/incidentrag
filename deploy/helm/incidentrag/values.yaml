@@ -46,7 +46,7 @@ config:
   githubRepo: argo-cd
   openrouterBaseUrl: https://openrouter.ai/api/v1
   openrouterUtilityModel: openai/gpt-4o-mini
-  openrouterReasoningModel: openai/gpt-4o
+  openrouterReasoningModel: openai/gpt-4o-mini
   openrouterEmbeddingModel: openai/text-embedding-3-small
 
 resources:

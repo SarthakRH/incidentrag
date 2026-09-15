@@ -21,6 +21,7 @@ from typing import Any
 from openai import AsyncOpenAI
 
 from incidentrag.core.ai_provider import openai_client_kwargs, reasoning_model_name
+from incidentrag.core.exceptions import GenerationError
 from incidentrag.core.models import (
     Claim,
     Evidence,
@@ -132,58 +133,43 @@ class StructuredReasoner:
         chunk_map = {i + 1: rr for i, rr in enumerate(retrieval_results)}
         user_msg = f"{context}\n\n---\nProduce the JSON assessment for the alert above."
 
+        # Provider errors must remain errors. Turning them into an empty assessment
+        # creates a convincing-looking 200 response with unrelated fallback evidence.
+        resp = await self._client.chat.completions.create(
+            model=self._model,
+            temperature=0.0,
+            max_tokens=settings.reasoning_max_output_tokens,
+            response_format={"type": "json_object"},
+            messages=[
+                {"role": "system", "content": _SYSTEM_PROMPT},
+                {"role": "user", "content": user_msg},
+            ],
+        )
         try:
-            resp = await self._client.chat.completions.create(
-                model=self._model,
-                temperature=0.0,
-                max_tokens=settings.reasoning_max_output_tokens,
-                response_format={"type": "json_object"},
-                messages=[
-                    {"role": "system", "content": _SYSTEM_PROMPT},
-                    {"role": "user", "content": user_msg},
-                ],
-            )
-            raw = json.loads(resp.choices[0].message.content or "{}")
-            usage = resp.usage
-            prompt_tokens = usage.prompt_tokens if usage else 0
-            completion_tokens = usage.completion_tokens if usage else 0
-        except (json.JSONDecodeError, Exception) as exc:
-            logger.error("Reasoner LLM call failed: %s", exc)
-            raw = {}
-            prompt_tokens = 0
-            completion_tokens = 0
+            raw = json.loads(resp.choices[0].message.content or "")
+        except (json.JSONDecodeError, TypeError) as exc:
+            raise GenerationError("Reasoning model returned malformed JSON") from exc
+        if not isinstance(raw, dict):
+            raise GenerationError("Reasoning model returned an invalid assessment")
+
+        usage = resp.usage
+        prompt_tokens = usage.prompt_tokens if usage else 0
+        completion_tokens = usage.completion_tokens if usage else 0
 
         # ── Root cause (required) ──────────────────────────────────────────
         rc_raw = raw.get("root_cause") or {}
+        if not isinstance(rc_raw, dict) or not str(rc_raw.get("statement") or "").strip():
+            raise GenerationError("Reasoning model omitted the root-cause statement")
+        root_evidence = _build_evidence_list(
+            rc_raw.get("evidence_indices", []), chunk_map
+        )
+        if not root_evidence:
+            raise GenerationError("Reasoning model did not cite retrieved evidence")
         root_cause = Claim(
-            statement=rc_raw.get("statement")
-            or "Root cause could not be determined from available evidence.",
-            evidence=_build_evidence_list(rc_raw.get("evidence_indices", []), chunk_map),
+            statement=str(rc_raw["statement"]).strip(),
+            evidence=root_evidence,
             confidence=float(rc_raw.get("confidence", 0.0)),
         )
-        # A Claim requires at least one Evidence per the model — if LLM omitted, insert placeholder
-        if not root_cause.evidence and retrieval_results:
-            top = retrieval_results[0]
-            root_cause.evidence = [
-                Evidence(
-                    chunk_id=top.chunk.chunk_id,
-                    runbook_id=top.chunk.runbook_id,
-                    header_breadcrumb=top.chunk.header_breadcrumb,
-                    excerpt=top.chunk.content[:200],
-                    relevance="background",
-                )
-            ]
-        elif not root_cause.evidence:
-            # No chunks at all — provide a stub so validation passes
-            root_cause.evidence = [
-                Evidence(
-                    chunk_id="none",
-                    runbook_id="none",
-                    header_breadcrumb="(no retrieval results)",
-                    excerpt="No retrieval context was available.",
-                    relevance="background",
-                )
-            ]
 
         # ── Contributing factors ───────────────────────────────────────────
         contributing = []
@@ -204,27 +190,9 @@ class StructuredReasoner:
             out: list[RemediationAction] = []
             for a in raw_list:
                 ev = _build_evidence_list(a.get("evidence_indices", []), chunk_map)
-                if not ev and retrieval_results:
-                    # Fallback: use top chunk as background evidence
-                    top = retrieval_results[0]
-                    ev = [
-                        Evidence(
-                            chunk_id=top.chunk.chunk_id,
-                            runbook_id=top.chunk.runbook_id,
-                            header_breadcrumb=top.chunk.header_breadcrumb,
-                            excerpt=top.chunk.content[:200],
-                            relevance="background",
-                        )
-                    ]
-                elif not ev:
-                    ev = [
-                        Evidence(
-                            chunk_id="none", runbook_id="none",
-                            header_breadcrumb="(no evidence)",
-                            excerpt="No supporting evidence available.",
-                            relevance="background",
-                        )
-                    ]
+                if not ev:
+                    logger.warning("Discarding action without valid evidence citation")
+                    continue
 
                 out.append(
                     RemediationAction(
@@ -252,8 +220,8 @@ class StructuredReasoner:
             escalation_reason = "Proposed action classified as DANGEROUS."
 
         # ── Cost estimate ──────────────────────────────────────────────────
-        # gpt-4o pricing (per 1K tok): $0.005 prompt / $0.015 completion
-        cost = (prompt_tokens * 0.005 + completion_tokens * 0.015) / 1000
+        # gpt-4o-mini pricing (per 1K tok): $0.00015 prompt / $0.0006 completion
+        cost = (prompt_tokens * 0.00015 + completion_tokens * 0.0006) / 1000
 
         evidence_chunks_used = list({
             ev.chunk_id

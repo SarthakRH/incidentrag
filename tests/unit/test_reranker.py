@@ -1,13 +1,12 @@
 """Tests for the cross-encoder Reranker."""
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
 from incidentrag.retrieval.reranker import Reranker
 from tests.unit.conftest import make_chunk, make_retrieval_result
-
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -96,3 +95,20 @@ async def test_rerank_no_top_k_returns_all(mock_encoder):
     results = await reranker.rerank("query", candidates)
 
     assert len(results) == 2
+
+
+async def test_rerank_drops_candidates_below_relevance_threshold(mock_encoder):
+    mock_encoder.predict.return_value = [0.8, -0.4]
+    results = await Reranker().rerank("OOMKilled query", _make_two_candidates())
+
+    assert [item.chunk.chunk_id for item in results] == ["c1"]
+
+
+async def test_rerank_keeps_hybrid_ranking_when_all_scores_are_below_threshold(
+    mock_encoder,
+) -> None:
+    mock_encoder.predict.return_value = [-0.2, -0.8]
+    results = await Reranker().rerank("TLS repository timeout", _make_two_candidates())
+
+    assert [item.chunk.chunk_id for item in results] == ["c1", "c2"]
+    assert results[0].scores.final_score >= results[1].scores.final_score

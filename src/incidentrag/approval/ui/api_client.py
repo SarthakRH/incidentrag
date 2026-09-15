@@ -4,8 +4,29 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 import httpx
+
+
+def prefer_ipv4_loopback(url: str) -> str:
+    """Use 127.0.0.1 so Windows clients do not stall on IPv6 localhost."""
+    parts = urlsplit(url)
+    hostname = (parts.hostname or "").lower()
+    if hostname != "localhost":
+        return url.rstrip("/")
+    host = "127.0.0.1"
+    if parts.port:
+        host = f"{host}:{parts.port}"
+    elif parts.scheme == "https":
+        host = f"{host}:443"
+    netloc = host
+    if parts.username:
+        user = parts.username
+        if parts.password:
+            user = f"{user}:{parts.password}"
+        netloc = f"{user}@{host}"
+    return urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment)).rstrip("/")
 
 
 class IncidentRAGAPIError(RuntimeError):
@@ -32,6 +53,9 @@ class IncidentRAGAPIClient:
     base_url: str
     api_key: str = ""
     timeout_seconds: float = 30.0
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "base_url", prefer_ipv4_loopback(self.base_url))
 
     @property
     def headers(self) -> dict[str, str]:

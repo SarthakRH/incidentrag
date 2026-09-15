@@ -21,6 +21,27 @@ from incidentrag.core.settings import settings
 logger = logging.getLogger(__name__)
 
 
+def _chunk_from_payload(point_id: object, payload: dict[str, Any] | None) -> Chunk:
+    p = payload or {}
+    ru = p.get("runbook_last_updated")
+    return Chunk(
+        chunk_id=p.get("chunk_id", str(point_id)),
+        runbook_id=p.get("runbook_id", "unknown"),
+        chunk_type=ChunkType(p.get("chunk_type", "prose")),
+        content=p.get("content", ""),
+        header_path=p.get("header_path", []),
+        header_breadcrumb=p.get("header_breadcrumb", ""),
+        position=p.get("position", 0),
+        token_count=p.get("token_count", 0),
+        content_sha256=p.get("content_sha256", ""),
+        service=p.get("service") or "unknown-service",
+        boost_score=p.get("boost_score", 1.0),
+        runbook_last_updated=(
+            datetime.fromisoformat(ru) if ru else datetime.now(UTC)
+        ),
+    )
+
+
 def _qdrant_id(chunk_id: str) -> str:
     """Deterministic UUID from chunk_id for Qdrant."""
     return str(uuid.uuid5(uuid.NAMESPACE_URL, chunk_id))
@@ -119,28 +140,30 @@ class DenseIndex:
             points = await self._legacy_search(embedding, k)
         chunks: list[tuple[Chunk, float]] = []
         for r in points:
-            p = r.payload or {}
             try:
-                ru = p.get("runbook_last_updated")
-                chunk = Chunk(
-                    chunk_id=p.get("chunk_id", str(r.id)),
-                    runbook_id=p.get("runbook_id", "unknown"),
-                    chunk_type=ChunkType(p.get("chunk_type", "prose")),
-                    content=p.get("content", ""),
-                    header_path=p.get("header_path", []),
-                    header_breadcrumb=p.get("header_breadcrumb", ""),
-                    position=p.get("position", 0),
-                    token_count=p.get("token_count", 0),
-                    content_sha256=p.get("content_sha256", ""),
-                    service=p.get("service"),
-                    boost_score=p.get("boost_score", 1.0),
-                    runbook_last_updated=(
-                        datetime.fromisoformat(ru) if ru else datetime.now(UTC)
-                    ),
-                )
-                chunks.append((chunk, float(r.score)))
+                chunks.append((_chunk_from_payload(r.id, r.payload), float(r.score)))
             except Exception as exc:
                 logger.warning("Skipping malformed Qdrant result: %s", exc)
+        return chunks
+
+    async def list_chunks(self, limit: int = 2000) -> list[Chunk]:
+        """Load stored chunks so BM25 can be rebuilt after process restart."""
+        try:
+            records, _offset = await self._qdrant.scroll(
+                collection_name=settings.qdrant_collection_name,
+                limit=limit,
+                with_payload=True,
+                with_vectors=False,
+            )
+        except Exception as exc:
+            logger.warning("Could not load Qdrant payloads for BM25: %s", exc)
+            return []
+        chunks: list[Chunk] = []
+        for record in records or []:
+            try:
+                chunks.append(_chunk_from_payload(record.id, record.payload))
+            except Exception as exc:
+                logger.warning("Skipping malformed Qdrant payload: %s", exc)
         return chunks
 
     async def _legacy_search(self, embedding: list[float], k: int) -> list[Any]:

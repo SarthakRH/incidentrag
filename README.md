@@ -73,7 +73,7 @@ grounding, and vector embeddings. Put the key in the local `.env` file:
 OPENROUTER_API_KEY=sk-or-v1-your-key
 OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
 OPENROUTER_UTILITY_MODEL=openai/gpt-4o-mini
-OPENROUTER_REASONING_MODEL=openai/gpt-4o
+OPENROUTER_REASONING_MODEL=openai/gpt-4o-mini
 OPENROUTER_EMBEDDING_MODEL=openai/text-embedding-3-small
 ```
 

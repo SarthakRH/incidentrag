@@ -1,5 +1,6 @@
 """Retrieval Layer — HybridRetriever."""
 from __future__ import annotations
+
 import asyncio
 import logging
 import time
@@ -12,6 +13,17 @@ from incidentrag.retrieval.reranker import Reranker
 from incidentrag.retrieval.rrf import _FusedEntry, apply_recency_and_boost, fuse_rrf
 
 logger = logging.getLogger(__name__)
+
+
+def _service_matches(expected: str, actual: str) -> bool:
+    """Prevent unrelated service runbooks from being presented as evidence."""
+    expected = expected.casefold().strip().replace("_", "-")
+    actual = actual.casefold().strip().replace("_", "-")
+    if not expected or expected in {"unknown", "unknown-service"}:
+        return True
+    if expected in {"argo-cd", "argocd"}:
+        return actual.startswith("argocd-") or actual in {"argo-cd", "argocd"}
+    return expected == actual
 
 
 def _fused_to_result(entry: _FusedEntry, primary_query: str) -> RetrievalResult:
@@ -41,7 +53,12 @@ def _fused_to_result(entry: _FusedEntry, primary_query: str) -> RetrievalResult:
 
 
 class HybridRetriever:
-    def __init__(self, bm25: BM25Index, dense: DenseIndex, reranker: Reranker | None = None) -> None:
+    def __init__(
+        self,
+        bm25: BM25Index,
+        dense: DenseIndex,
+        reranker: Reranker | None = None,
+    ) -> None:
         self.bm25 = bm25
         self.dense = dense
         self.reranker = reranker or Reranker()
@@ -68,6 +85,7 @@ class HybridRetriever:
         queries: list[str],
         hyde_document: str = "",
         top_k: int | None = None,
+        service: str | None = None,
     ) -> RetrievalOutput:
         top_k = top_k or settings.retrieval_top_k
         k = settings.retrieval_top_k
@@ -91,6 +109,12 @@ class HybridRetriever:
         primary_query = queries[0] if queries else ""
         candidates_fused = sorted(merged.values(), key=lambda x: x.rrf_score, reverse=True)[:k]
         candidates = [_fused_to_result(e, primary_query) for e in candidates_fused]
+
+        if service:
+            candidates = [
+                item for item in candidates
+                if _service_matches(service, item.chunk.service)
+            ]
 
         reranked = await self.reranker.rerank(primary_query, candidates, top_k=top_k)
 

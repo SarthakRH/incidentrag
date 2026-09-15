@@ -15,6 +15,7 @@ except ImportError:  # Optional in lean API images.
     CrossEncoder = None  # type: ignore[assignment, misc]
 
 from incidentrag.core.models import RetrievalResult
+from incidentrag.core.settings import settings
 
 logger = logging.getLogger(__name__)
 
@@ -67,5 +68,18 @@ class Reranker:
             rc.scores.reranker_score = float(score)
             rc.scores.final_score = float(score)
 
-        reranked = sorted(candidates, key=lambda x: x.scores.final_score, reverse=True)
+        relevant = [
+            item
+            for item in candidates
+            if item.scores.reranker_score is not None
+            and item.scores.reranker_score >= settings.reranker_min_score
+        ]
+        if not relevant:
+            logger.warning(
+                "All %d reranker scores were below %.2f; keeping the hybrid ranking",
+                len(candidates),
+                settings.reranker_min_score,
+            )
+            relevant = candidates
+        reranked = sorted(relevant, key=lambda x: x.scores.final_score, reverse=True)
         return reranked[:top_k] if top_k else reranked
